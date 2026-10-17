@@ -1,0 +1,228 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email == "mr-zinger@gmail.com";
+    }
+
+    function hasRole(role) {
+      return isOwner() || (request.auth != null
+        && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.roles[role] == true);
+    }
+
+    function customerIsActive(customerUid) {
+      return !exists(/databases/$(database)/documents/customerProfiles/$(customerUid))
+        || get(/databases/$(database)/documents/customerProfiles/$(customerUid)).data.get("blocked", false) != true;
+    }
+
+    match /siteConfig/menu {
+      allow read: if true;
+      allow create, update: if hasRole("menu")
+        && request.resource.data.keys().hasOnly(["categories", "items", "updatedAt"])
+        && request.resource.data.categories is list
+        && request.resource.data.items is list;
+      allow delete: if hasRole("menu");
+    }
+
+    match /siteConfig/restaurant {
+      allow read: if true;
+      allow create, update: if hasRole("settings")
+        && request.resource.data.keys().hasOnly([
+          "branches", "openingHours", "deliveryFee", "deliveryEnabled", "pickupEnabled", "updatedAt"
+        ]);
+      allow delete: if hasRole("settings");
+    }
+
+    match /siteConfig/offers {
+      allow read: if true;
+      allow create, update: if hasRole("offers")
+        && request.resource.data.keys().hasOnly(["offers", "updatedAt"])
+        && request.resource.data.offers is list;
+      allow delete: if hasRole("offers");
+    }
+
+    match /siteConfig/announcement {
+      allow read: if true;
+      allow create, update: if hasRole("announcement")
+        && request.resource.data.keys().hasOnly([
+          "enabled", "text", "style", "backgroundColor", "textColor",
+          "startsAt", "endsAt", "linkUrl", "linkLabel", "updatedAt"
+        ])
+        && request.resource.data.enabled is bool
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 180
+        && request.resource.data.style in ["simple", "highlight", "gradient"]
+        && request.resource.data.backgroundColor is string
+        && request.resource.data.textColor is string
+        && request.resource.data.startsAt is string
+        && request.resource.data.endsAt is string
+        && request.resource.data.linkUrl is string
+        && request.resource.data.linkLabel is string;
+      allow delete: if hasRole("announcement");
+    }
+
+    match /siteConfig/quantityPromotion {
+      allow read: if true;
+      allow create, update: if hasRole("promotions")
+        && request.resource.data.keys().hasOnly([
+          "enabled", "menuItemId", "buyQuantity", "rewardQuantity", "rewardPrice", "updatedAt"
+        ])
+        && request.resource.data.enabled is bool
+        && request.resource.data.menuItemId is string
+        && request.resource.data.buyQuantity is int
+        && request.resource.data.buyQuantity >= 2
+        && request.resource.data.rewardQuantity is int
+        && request.resource.data.rewardQuantity >= 1
+        && request.resource.data.rewardPrice is number
+        && request.resource.data.rewardPrice >= 0;
+      allow delete: if hasRole("promotions");
+    }
+
+    match /siteConfig/customerAccounts {
+      allow read: if true;
+      allow create, update: if hasRole("settings")
+        && request.resource.data.keys().hasOnly(["enabled", "orderHandling", "paymentMethods", "estimatedMinutes", "updatedAt"])
+        && request.resource.data.enabled is bool
+        && request.resource.data.orderHandling in ["whatsapp", "dashboard"]
+        && request.resource.data.paymentMethods is list
+        && request.resource.data.paymentMethods.size() <= 10
+        && request.resource.data.estimatedMinutes is int
+        && request.resource.data.estimatedMinutes >= 5
+        && request.resource.data.estimatedMinutes <= 240;
+      allow delete: if hasRole("settings");
+    }
+
+    match /customerProfiles/{customerUid} {
+      allow read: if isOwner() || hasRole("support") || (request.auth != null && request.auth.uid == customerUid);
+      allow create, update: if request.auth != null
+        && request.auth.uid == customerUid
+        && request.resource.data.keys().hasOnly([
+          "name", "phone", "email", "blocked", "phone2", "deliveryMethod", "branchId", "manualAddress",
+          "addressDetails", "location", "paymentMethod", "updatedAt"
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() <= 24
+        && (!('email' in request.resource.data) || request.resource.data.email is string)
+        && (!('blocked' in request.resource.data) || request.resource.data.blocked == false)
+        && request.resource.data.phone2 is string
+        && request.resource.data.phone2.size() <= 24
+        && request.resource.data.deliveryMethod in ["delivery", "pickup"]
+        && request.resource.data.branchId is string
+        && request.resource.data.manualAddress is string
+        && request.resource.data.manualAddress.size() <= 500
+        && request.resource.data.addressDetails is string
+        && request.resource.data.addressDetails.size() <= 500
+        && request.resource.data.paymentMethod is string;
+      allow update: if isOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["blocked", "updatedAt"])
+        && request.resource.data.blocked is bool;
+      allow delete: if request.auth != null && request.auth.uid == customerUid;
+    }
+
+    match /siteImages/{imageId} {
+      allow read: if true;
+      allow create, update: if hasRole("menu")
+        && request.resource.data.keys().hasOnly(["dataUrl", "mimeType", "updatedAt"])
+        && request.resource.data.dataUrl is string
+        && request.resource.data.dataUrl.size() <= 700000
+        && request.resource.data.mimeType in ["image/webp", "image/jpeg", "image/png"];
+      allow delete: if hasRole("menu");
+    }
+
+    match /coupons/{code} {
+      allow read: if hasRole("coupons") || resource.data.active == true;
+      allow create, update: if hasRole("coupons")
+        && request.resource.data.keys().hasOnly(["code", "type", "value", "minOrder", "active", "updatedAt"])
+        && request.resource.data.code == code
+        && request.resource.data.type in ["percentage", "fixed"]
+        && request.resource.data.value is number
+        && request.resource.data.value > 0
+        && (request.resource.data.type != "percentage" || request.resource.data.value <= 100)
+        && request.resource.data.minOrder is number
+        && request.resource.data.minOrder >= 0;
+      allow delete: if hasRole("coupons");
+    }
+
+    match /orders/{orderId} {
+      allow create: if request.resource.data.keys().hasOnly([
+          "customerName", "customerPhone", "customerPhone2", "deliveryMethod",
+          "branchId", "branchName", "branchAddress", "manualAddress",
+          "addressDetails", "location", "notes", "items", "totalItems",
+          "totalAmount", "discountAmount", "couponCode", "orderNumber", "status", "createdAt", "createdAtMs", "customerUid", "paymentMethod", "paymentMethodLabel", "estimatedReadyAtMs"
+        ])
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() >= 2
+        && request.resource.data.customerName.size() <= 120
+        && request.resource.data.customerPhone is string
+        && request.resource.data.customerPhone.size() >= 8
+        && request.resource.data.customerPhone.size() <= 24
+        && request.resource.data.deliveryMethod in ["delivery", "pickup"]
+        && request.resource.data.branchId is string
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 100
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.totalItems is number
+        && request.resource.data.totalItems > 0
+        && request.resource.data.orderNumber is string
+        && request.resource.data.orderNumber.matches('^[0-9]{13,20}$')
+        && (! ("paymentMethod" in request.resource.data) || request.resource.data.paymentMethod is string)
+        && (! ("paymentMethodLabel" in request.resource.data) || request.resource.data.paymentMethodLabel is string)
+        && (! ("estimatedReadyAtMs" in request.resource.data) || request.resource.data.estimatedReadyAtMs is int)
+        && request.resource.data.status == "new"
+        && (!("customerUid" in request.resource.data)
+          || (request.auth != null && request.resource.data.customerUid == request.auth.uid && customerIsActive(request.auth.uid)));
+
+      allow read: if hasRole("orders") || hasRole("reports") || (request.auth != null && resource.data.customerUid == request.auth.uid && customerIsActive(request.auth.uid));
+      allow delete: if hasRole("orders");
+      allow update: if hasRole("orders")
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["status", "updatedAt"])
+        || (request.auth != null
+          && resource.data.customerUid == request.auth.uid
+          && customerIsActive(request.auth.uid)
+          && resource.data.status == "new"
+          && request.resource.data.status == "cancelled"
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"]));
+    }
+
+    match /staff/{staffUid} {
+      allow read: if isOwner() || (request.auth != null && request.auth.uid == staffUid);
+      allow create, update, delete: if isOwner();
+    }
+
+    match /supportConversations/{customerUid} {
+      allow read: if isOwner() || hasRole("support") || (request.auth != null && request.auth.uid == customerUid && customerIsActive(customerUid));
+      allow create, update: if request.auth != null
+        && (isOwner() || hasRole("support") || (request.auth.uid == customerUid && customerIsActive(customerUid)))
+        && request.resource.data.keys().hasOnly(["customerName", "customerEmail", "customerPhone", "lastMessage", "status", "updatedAt"])
+        && request.resource.data.customerName is string
+        && request.resource.data.customerEmail is string
+        && request.resource.data.customerPhone is string
+        && request.resource.data.customerPhone.size() <= 24
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessage.size() <= 240
+        && request.resource.data.status in ["open", "closed"];
+      allow delete: if isOwner();
+
+      match /messages/{messageId} {
+        allow read: if isOwner() || hasRole("support") || (request.auth != null && request.auth.uid == customerUid && customerIsActive(customerUid));
+        allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(["senderUid", "senderRole", "text", "createdAt"])
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && ((request.auth.uid == customerUid && request.resource.data.senderRole == "customer")
+            || ((isOwner() || hasRole("support")) && request.resource.data.senderRole == "support"))
+          && (request.auth.uid != customerUid || customerIsActive(customerUid));
+      }
+    }
+  }
+}

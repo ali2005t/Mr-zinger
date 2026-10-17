@@ -1,0 +1,5 @@
+{
+  "name": "MR. ZINGER — Crepe & Pizza",
+  "description": "الموقع الرسمي لمطعم مستر زنجر في حلوان. تصفح قائمة الكريب والبيتزا والوجبات، وأرسل طلبك عبر واتساب.",
+  "requestFramePermissions": ["geolocation"]
+}
